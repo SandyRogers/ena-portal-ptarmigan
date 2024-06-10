@@ -1,0 +1,7 @@
+/.cache-data.db
+/.cache-state.db
+/src/ptarmigan/.cache-data.db
+/src/ptarmigan/.cache-state.db
+/dist/
+/build/
+/.idea/

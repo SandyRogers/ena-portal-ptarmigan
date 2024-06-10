@@ -1,0 +1,104 @@
+name: Build and Release binaries
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Build project
+        run: poetry build
+
+      - name: Create release directory
+        run: mkdir -p dist/pyinstaller/linux/ptpt
+
+      - name: Move build artifacts
+        run: mv dist/pystinaller/*/ptpt dist/pyinstall/linux/ptpt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-ptpt
+          path: dist/pyinstaller/linux/ptpt
+
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Build project
+        run: poetry build
+
+      - name: Create release directory
+        run: mkdir -p dist/pyinstaller/macos/ptpt
+
+      - name: Move build artifacts
+        run: mv dist/* dist/pyinstaller/macos/ptpt/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-ptpt
+          path: dist/pyinstaller/macos/ptpt
+
+
+  create-release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-ptpt
+          path: ./dist/pyinstaller/linux/ptpt
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-ptpt
+          path: ./dist/pyinstaller/macos/ptpt
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./dist/pyinstaller/macos/ptpt
+            ./dist/pyinstaller/linux/ptpt
