@@ -39,7 +39,7 @@ jobs:
         run: mkdir -p dist/pyinstaller/linux/
 
       - name: Move build artifacts
-        run: mv dist/pystinaller/*/ptpt dist/pyinstall/linux/ptpt
+        run: mv dist/pyinstaller/*/ptpt dist/pyinstall/linux/ptpt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
