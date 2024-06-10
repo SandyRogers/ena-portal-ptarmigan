@@ -90,13 +90,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: linux-ptpt
-          path: ./dist/pyinstaller/linux/ptpt
+          path: linux-ptpt
 
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
           name: macos-ptpt
-          path: ./dist/pyinstaller/macos/ptpt
+          path: macos-ptpt
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -104,5 +104,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ./dist/pyinstaller/macos/ptpt
-            ./dist/pyinstaller/linux/ptpt
+            macos-ptpt
+            linux-ptpt
