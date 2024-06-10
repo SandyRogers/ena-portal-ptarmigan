@@ -30,17 +30,14 @@ jobs:
       - name: Build project
         run: poetry build
 
-      - name: Create release directory
-        run: mkdir -p dist/pyinstaller/linux/
-
       - name: Move build artifacts
-        run: mv dist/pyinstaller/*/ptpt dist/pyinstaller/linux/ptpt
+        run: mv dist/pyinstaller/*/ptpt dist/pyinstaller/ptpt-linux
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-ptpt
-          path: dist/pyinstaller/linux/ptpt
+          name: ptpt-linux
+          path: dist/pyinstaller/ptpt-linux
 
 
   build-macos:
@@ -69,17 +66,14 @@ jobs:
       - name: Build project
         run: poetry build
 
-      - name: Create release directory
-        run: mkdir -p dist/pyinstaller/macos/
-
       - name: Move build artifacts
-        run: mv dist/pyinstaller/*/ptpt dist/pyinstaller/macos/ptpt
+        run: mv dist/pyinstaller/*/ptpt dist/pyinstaller/ptpt-macos
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-ptpt
-          path: dist/pyinstaller/macos/ptpt
+          name: ptpt-macos
+          path: dist/pyinstaller/ptpt-macos
 
 
   create-release:
@@ -89,14 +83,12 @@ jobs:
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: linux-ptpt
-          path: linux-ptpt
+          name: ptpt-linux
 
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: macos-ptpt
-          path: macos-ptpt
+          name: ptpt-macos
 
       - name: See artifacts
         run: |
@@ -109,5 +101,5 @@ jobs:
         with:
           fail_on_unmatched_files: true
           files: |
-            macos-ptpt
-            linux-ptpt
+            ptpt-macos
+            ptpt-linux
