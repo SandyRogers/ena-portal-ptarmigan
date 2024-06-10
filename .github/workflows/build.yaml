@@ -1,12 +1,7 @@
 name: Build and Release binaries
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  push
 
 jobs:
   build-linux:
@@ -104,6 +99,7 @@ jobs:
           path: ./dist/pyinstaller/macos/ptpt
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
