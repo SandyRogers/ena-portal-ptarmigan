@@ -98,11 +98,16 @@ jobs:
           name: macos-ptpt
           path: macos-ptpt
 
+      - name: See artifacts
+        run: |
+          ls -Flrth
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
           files: |
             macos-ptpt
             linux-ptpt
