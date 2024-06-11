@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04  # For old glibc matching EBI HPC. With apologies to the year 2021+.
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
