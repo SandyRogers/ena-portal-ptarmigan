@@ -123,9 +123,11 @@ class GlobalOptions(Widget):
         if event.control.id == 'portal-selector':
             log(f"Setting data portal state to {event.value}")
             cached_state.update_state("data_portal", event.value)
+            self.app.data_portal = event.value
         if event.control.id == "format-selector":
             log(f"Setting format state to {event.value}")
             cached_state.update_state('format', event.value)
+            self.app.format = event.value
 
 
 class ReturnFieldsSelector(Widget):
