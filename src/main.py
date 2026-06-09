@@ -9,7 +9,7 @@ from textual.containers import Container, VerticalScroll, Horizontal
 from textual.reactive import reactive, var
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Select, Label, RadioSet, RadioButton, \
-    LoadingIndicator, Input, Button, Placeholder, SelectionList
+    LoadingIndicator, Input, Button, Placeholder, SelectionList, Static
 
 from ptarmigan.app_state import CachedAppState, DataPortalEnum, FormatEnum
 from ptarmigan.data_state import get_data, clear_cache, get_endpoint_url
@@ -44,6 +44,10 @@ class ResultTypeSelector(Widget):
             else:
                 results = get_data(f"results?dataPortal={self.data_portal.value}&format={self.format.value}")
 
+                if results.error:
+                    yield Static(results.error, classes="error")
+                    return
+
                 if self.result_type and not np.any(results.data.resultId.str.contains("study")):
                     # An invalid result type was previously set
                     self.result_type = None
@@ -55,10 +59,10 @@ class ResultTypeSelector(Widget):
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         self.result_type = event.pressed.label
 
-    def on_mount(self):
+    async def on_mount(self):
         if not self.result_type:
             self.result_type = "study"
-        self.recompose()
+        await self.recompose()
 
 
 class SearchForm(Widget):
@@ -81,6 +85,10 @@ class SearchForm(Widget):
                 yield LoadingIndicator(classes='list_heading')
             else:
                 search_fields = get_data(f"searchFields?dataPortal={self.data_portal.value}&format={self.format.value}&result={self.result_type}")
+
+                if search_fields.error:
+                    yield Static(search_fields.error, classes="error")
+                    return
 
                 for _, field in search_fields.data.iterrows():
                     yield Input(placeholder=field["columnId"], id=field["columnId"])
@@ -157,6 +165,10 @@ class ReturnFieldsSelector(Widget):
             else:
                 results = get_data(f"returnFields?dataPortal={self.data_portal.value}&format={self.format.value}&result={self.result_type}")
 
+                if results.error:
+                    yield Static(results.error, classes="error")
+                    return
+
                 yield SelectionList[str](
                     *[(result["columnId"], result["columnId"]) for _, result in results.data.iterrows()],
                 )
@@ -202,6 +214,10 @@ class SearchResults(Widget):
 
                 results = get_data(
                     f"search?result={self.result_type}&dataPortal={self.data_portal.value}&format={self.format.value}&limit={self.limit}{qs}{rfs}")
+                if results.error:
+                    yield Static(results.error, classes="error")
+                    return
+
                 tab = PandasTable(results.data)
                 yield tab
 
@@ -229,6 +245,10 @@ class SearchResults(Widget):
 
     def action_dump_data(self):
         all_data = get_data(self.get_endpoint_without_limit(), use_cache=False)
+        if all_data.error:
+            self.notify(all_data.error, severity="error")
+            return
+
         fn = f"{self.result_type}-{time.time()}.tsv"
         all_data.data.to_csv(fn, sep='\t', index=False)
         self.notify(f"Dumped to {fn}")

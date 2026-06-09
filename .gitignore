@@ -1,7 +1,10 @@
 /.cache-data.db
 /.cache-state.db
+/.cache/
+**/__pycache__/
 /src/ptarmigan/.cache-data.db
 /src/ptarmigan/.cache-state.db
 /dist/
 /build/
 /.idea/
+**/.DS_Store

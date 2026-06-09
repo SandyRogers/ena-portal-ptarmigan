@@ -1,27 +1,34 @@
 [tool.poetry]
 name = "ptarmigan"
-version = "0.1.3"
+version = "0.2.0"
 description = ""
 authors = ["Sandy Rogers <sandyr@ebi.ac.uk>"]
 
 [tool.poetry.dependencies]
-python = "^3.11"
-textual = "^0.63.6"
-textual-dev = "^1.5.1"
-pydantic = "^2.7.2"
-pydantic-settings = "^2.2.1"
-httpx = "^0.27.0"
-pandas = "^2.2.2"
-pyperclip = "1.8.2"
+python = ">=3.14,<3.15"
+textual = "^8.2.7"
+textual-dev = "^1.8.0"
+pydantic = "^2.13.4"
+pydantic-settings = "^2.14.1"
+httpx = "^0.28.1"
+pandas = "^3.0.3"
+pyperclip = "^1.11.0"
+platformdirs = "^4.10.0"
+
+[tool.poetry.group.build]
+optional = true
+
+[tool.poetry.group.build.dependencies]
+pyinstaller = "6.20.0"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core>=2.4.1"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 ptpt = "src.main:main"
 
-[tool.poetry-pyinstaller-plugin.scripts]
+[tool.poetry-pyinstaller-plugin.targets]
 ptpt = { source = "src/main.py", type = "onefile", bundle = true}
 
 [tool.poetry-pyinstaller-plugin.collect]

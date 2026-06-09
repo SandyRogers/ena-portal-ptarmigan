@@ -1,105 +1,97 @@
-name: Build and Release binaries
+name: Build and release binaries
 
 on:
-  push
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  POETRY_VERSION: "2.4.1"
+  POETRY_PYINSTALLER_PLUGIN_VERSION: "2.0.3"
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-20.04  # For old glibc matching EBI HPC. With apologies to the year 2021+.
+  build:
+    name: Build ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            asset: linux-x86_64
+          - runner: macos-15-intel
+            asset: macos-x86_64
+
+    runs-on: ${{ matrix.runner }}
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: "3.14"
 
-      - name: Install Poetry
+      - name: Install build tools
         run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install Poetry Pyinstaller plugin
-        run: |
-          poetry self add poetry-pyinstaller-plugin
+          python -m pip install --upgrade pip pipx
+          pipx install "poetry==$POETRY_VERSION"
+          pipx inject poetry "poetry-pyinstaller-plugin==$POETRY_PYINSTALLER_PLUGIN_VERSION"
 
       - name: Install dependencies
-        run: poetry install
+        run: poetry install --no-interaction --with build
 
-      - name: Build project
+      - name: Run tests
+        run: poetry run python -m unittest discover -s tests -v
+
+      - name: Build binary
         run: poetry build
 
-      - name: Move build artifacts
-        run: mv dist/pyinstaller/*/ptpt dist/pyinstaller/ptpt-linux
+      - name: Prepare binary
+        shell: bash
+        run: |
+          binary_path="$(find dist/pyinstaller -type f -name ptpt -print -quit)"
+          test -n "$binary_path"
+          install -m 755 "$binary_path" "dist/ptpt-${{ matrix.asset }}"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Inspect binary
+        run: |
+          test -x "dist/ptpt-${{ matrix.asset }}"
+          file "dist/ptpt-${{ matrix.asset }}"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
         with:
-          name: ptpt-linux
-          path: dist/pyinstaller/ptpt-linux
+          name: ptpt-${{ matrix.asset }}
+          path: dist/ptpt-${{ matrix.asset }}
+          if-no-files-found: error
 
+  release:
+    name: Create GitHub release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
 
-  build-macos:
-    runs-on: macos-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Download binaries
+        uses: actions/download-artifact@v8
         with:
-          python-version: '3.11'
+          pattern: ptpt-*
+          path: dist/release
+          merge-multiple: true
 
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install Poetry Pyinstaller plugin
-        run: |
-          poetry self add poetry-pyinstaller-plugin
-
-      - name: Install dependencies
-        run: poetry install
-
-      - name: Build project
-        run: poetry build
-
-      - name: Move build artifacts
-        run: mv dist/pyinstaller/*/ptpt dist/pyinstaller/ptpt-macos
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ptpt-macos
-          path: dist/pyinstaller/ptpt-macos
-
-
-  create-release:
-    needs: [build-linux, build-macos]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Linux artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ptpt-linux
-
-      - name: Download macOS artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ptpt-macos
-
-      - name: See artifacts
-        run: |
-          ls -Flrth
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        id: create_release
-        uses: softprops/action-gh-release@v2
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
         with:
           fail_on_unmatched_files: true
-          files: |
-            ptpt-macos
-            ptpt-linux
+          generate_release_notes: true
+          files: dist/release/ptpt-*

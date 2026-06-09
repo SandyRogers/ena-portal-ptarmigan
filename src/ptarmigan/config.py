@@ -1,5 +1,6 @@
 from pydantic import HttpUrl
 from pydantic_settings import BaseSettings
+from platformdirs import user_cache_path
 
 
 class _EnaConfig(BaseSettings):
@@ -8,7 +9,7 @@ class _EnaConfig(BaseSettings):
 
 
 class _CacheConfig(BaseSettings):
-    cache_dir: str = '.cache'
+    cache_dir: str = str(user_cache_path("ptarmigan"))
 
 
 class _AppConfig(BaseSettings):
