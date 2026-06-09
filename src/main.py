@@ -1,3 +1,4 @@
+import time
 from typing import List, Dict
 
 import numpy as np
@@ -186,6 +187,7 @@ class SearchResults(Widget):
         ("u", "show_url", "Show query URL"),
         ("p", "copy_url", "Copy query URL"),
         ("m", "load_more", "Load more"),
+        ("d", "dump_data", "Dump to TSV")
     ]
 
     def compose(self) -> ComposeResult:
@@ -210,16 +212,26 @@ class SearchResults(Widget):
     def action_load_more(self):
         self.limit += 25
 
-    def action_show_url(self):
+    def get_endpoint_without_limit(self):
         qs = f"&query=\"{self.queries}\"" if self.queries else ""
         rfs = f"&fields={','.join(self.return_fields)}" if self.return_fields else ""
-        self.notify(get_endpoint_url(f"search?result={self.result_type}&dataPortal={self.data_portal.value}&format={self.format.value}{qs}{rfs}"))
+        return f"search?result={self.result_type}&dataPortal={self.data_portal.value}&format={self.format.value}{qs}{rfs}"
+
+    def get_url_without_limit(self):
+        return get_endpoint_url(self.get_endpoint_without_limit())
+
+    def action_show_url(self):
+        self.notify(self.get_url_without_limit())
 
     def action_copy_url(self):
-        qs = f"&query=\"{self.queries}\"" if self.queries else ""
-        rfs = f"&fields={','.join(self.return_fields)}" if self.return_fields else ""
-        pyperclip.copy(get_endpoint_url(f"search?result={self.result_type}&dataPortal={self.data_portal.value}&format={self.format.value}{qs}{rfs}"))
+        pyperclip.copy(self.get_url_without_limit())
         self.notify("Copied!")
+
+    def action_dump_data(self):
+        all_data = get_data(self.get_endpoint_without_limit(), use_cache=False)
+        fn = f"{self.result_type}-{time.time()}.tsv"
+        all_data.data.to_csv(fn, sep='\t', index=False)
+        self.notify(f"Dumped to {fn}")
 
 
 class PortalPtarmigan(App):

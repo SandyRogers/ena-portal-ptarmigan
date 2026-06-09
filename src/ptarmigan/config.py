@@ -1,4 +1,4 @@
-from pydantic import HttpUrl, FilePath
+from pydantic import HttpUrl
 from pydantic_settings import BaseSettings
 
 
@@ -8,7 +8,7 @@ class _EnaConfig(BaseSettings):
 
 
 class _CacheConfig(BaseSettings):
-    cache_file: str = '.cache'
+    cache_dir: str = '.cache'
 
 
 class _AppConfig(BaseSettings):

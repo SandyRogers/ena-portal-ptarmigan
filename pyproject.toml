@@ -19,7 +19,7 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-ptpt = "src:main.main"
+ptpt = "src.main:main"
 
 [tool.poetry-pyinstaller-plugin.scripts]
 ptpt = { source = "src/main.py", type = "onefile", bundle = true}
