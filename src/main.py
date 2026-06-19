@@ -1,4 +1,6 @@
 import time
+from dataclasses import dataclass
+from enum import Enum
 from typing import List, Dict
 
 import numpy as np
@@ -8,13 +10,82 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, VerticalScroll, Horizontal
 from textual.message import Message
 from textual.reactive import reactive, var
+from textual.suggester import SuggestFromList
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Select, Label, RadioSet, RadioButton, \
-    LoadingIndicator, Input, Button, Placeholder, SelectionList, Static, OptionList, DataTable
+    LoadingIndicator, Input, Button, Placeholder, SelectionList, Static, OptionList, DataTable, Checkbox
 
 from ptarmigan.app_state import CachedAppState, DataPortalEnum, FormatEnum
 from ptarmigan.data_state import get_data, clear_cache, get_endpoint_url
 from ptarmigan.pandas_table import PandasTable
+
+
+class ENAQueryOperator(str, Enum):
+    OR = "OR"
+    AND = "AND"
+
+
+@dataclass(frozen=True)
+class ENAQueryClause:
+    search_field: str
+    value: str
+    is_not: bool = False
+
+    def __str__(self) -> str:
+        not_prefix = "NOT " if self.is_not else ""
+        return f"{not_prefix}{self.search_field}={self.value}"
+
+    def __or__(self, other: "ENAQueryExpression") -> "ENAQueryPair":
+        return ENAQueryPair(left=self, operator=ENAQueryOperator.OR, right=other)
+
+    def __and__(self, other: "ENAQueryExpression") -> "ENAQueryPair":
+        return ENAQueryPair(left=self, operator=ENAQueryOperator.AND, right=other)
+
+    def __invert__(self) -> "ENAQueryClause":
+        return ENAQueryClause(self.search_field, self.value, not self.is_not)
+
+
+@dataclass(frozen=True)
+class ENAQueryPair:
+    left: "ENAQueryExpression"
+    operator: ENAQueryOperator
+    right: "ENAQueryExpression"
+    is_not: bool = False
+
+    def __str__(self) -> str:
+        not_prefix = "NOT " if self.is_not else ""
+        return f"{not_prefix}({self.left} {self.operator.value} {self.right})"
+
+    def __or__(self, other: "ENAQueryExpression") -> "ENAQueryPair":
+        return ENAQueryPair(left=self, operator=ENAQueryOperator.OR, right=other)
+
+    def __and__(self, other: "ENAQueryExpression") -> "ENAQueryPair":
+        return ENAQueryPair(left=self, operator=ENAQueryOperator.AND, right=other)
+
+    def __invert__(self) -> "ENAQueryPair":
+        return ENAQueryPair(self.left, self.operator, self.right, not self.is_not)
+
+
+ENAQueryExpression = ENAQueryClause | ENAQueryPair
+
+
+def combine_query_expressions(
+        expressions: list[ENAQueryExpression],
+        operators: list[ENAQueryOperator],
+) -> ENAQueryExpression:
+    expression = expressions[0]
+    for operator, next_expression in zip(operators, expressions[1:]):
+        expression = ENAQueryPair(left=expression, operator=operator, right=next_expression)
+    return expression
+
+
+def has_ancestor(widget: Widget, widget_type: type[Widget]) -> bool:
+    parent = widget.parent
+    while parent is not None:
+        if isinstance(parent, widget_type):
+            return True
+        parent = parent.parent
+    return False
 
 
 class ListFilter(Widget):
@@ -42,6 +113,7 @@ class ListFilter(Widget):
         text-wrap: nowrap;
         text-overflow: ellipsis;
     }
+
     """
 
     class Selected(Message):
@@ -51,9 +123,10 @@ class ListFilter(Widget):
 
     choices: reactive[List[str]] = reactive([], init=False)
 
-    def __init__(self, choices: List[str] | None = None, **kwargs) -> None:
+    def __init__(self, choices: List[str] | None = None, max_matches: int | None = 25, **kwargs) -> None:
         super().__init__(**kwargs)
         self.choices = choices or []
+        self.max_matches = max_matches
         self.matches: List[str] = []
 
     def compose(self) -> ComposeResult:
@@ -63,12 +136,12 @@ class ListFilter(Widget):
     def on_mount(self) -> None:
         self.refresh_matches()
 
-    def open(self) -> None:
+    def open(self, initial_value: str = "") -> None:
         self.remove_class("hidden")
         filter_input = self.query_one(Input)
-        filter_input.value = ""
+        filter_input.value = initial_value
         filter_input.focus()
-        self.refresh_matches()
+        self.refresh_matches(initial_value)
 
     def close(self) -> None:
         self.add_class("hidden")
@@ -82,7 +155,8 @@ class ListFilter(Widget):
 
         option_list = self.query_one(OptionList)
         option_list.clear_options()
-        option_list.add_options(self.matches[:25] or ["No matches"])
+        visible_matches = self.matches if self.max_matches is None else self.matches[:self.max_matches]
+        option_list.add_options(visible_matches or ["No matches"])
         option_list.highlighted = 0 if self.matches else None
 
     def select_highlighted(self) -> None:
@@ -120,6 +194,266 @@ class ListFilter(Widget):
             event.prevent_default()
         elif event.key == "enter":
             self.select_highlighted()
+            event.stop()
+            event.prevent_default()
+
+
+class CompoundQueryBuilder(VerticalScroll):
+    DEFAULT_CSS = """
+    CompoundQueryBuilder {
+        width: 112;
+        max-width: 92vw;
+        height: 88vh;
+        overlay: screen;
+        layer: overlay;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    CompoundQueryBuilder.hidden {
+        display: none;
+    }
+
+    CompoundQueryBuilder .compound-heading {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    CompoundQueryBuilder .compound-group {
+        height: auto;
+        border-top: solid $accent;
+        padding-top: 1;
+        margin-top: 1;
+    }
+
+    CompoundQueryBuilder .compound-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    CompoundQueryBuilder .top-operator {
+        width: 7;
+        text-wrap: nowrap;
+    }
+
+    CompoundQueryBuilder .clause-operator {
+        width: 7;
+        text-wrap: nowrap;
+    }
+
+    CompoundQueryBuilder .compound-field {
+        width: 34;
+    }
+
+    CompoundQueryBuilder .compound-value {
+        width: 34;
+    }
+
+    CompoundQueryBuilder .compound-not {
+        width: 14;
+        text-wrap: nowrap;
+    }
+
+    CompoundQueryBuilder .compound-preview {
+        min-height: 3;
+        max-height: 5;
+        border: solid $secondary;
+        padding: 0 1;
+        text-wrap: wrap;
+    }
+
+    CompoundQueryBuilder .compound-actions {
+        height: auto;
+        margin-top: 1;
+        margin-bottom: 1;
+    }
+    """
+
+    GROUP_COUNT = 3
+    CLAUSES_PER_GROUP = 3
+
+    class Applied(Message):
+        def __init__(self, query: str) -> None:
+            self.query = query
+            super().__init__()
+
+    def __init__(self, field_ids: list[str], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.field_ids = field_ids
+
+    def compose(self) -> ComposeResult:
+        yield Static("Compound query builder", classes="compound-heading")
+        yield Static(
+            "Fill any rows you need. Clauses within a group are parenthesized, then groups are combined.",
+            classes="compound-help",
+        )
+        with Horizontal(classes="compound-actions"):
+            yield Button("Apply", id="apply-compound", variant="primary")
+            yield Button("Preview", id="preview-compound")
+            yield Button("Clear", id="clear-compound")
+            yield Button("Close", id="close-compound")
+        yield Static("", id="compound-preview", classes="compound-preview")
+        for group_index in range(self.GROUP_COUNT):
+            with Container(classes="compound-group"):
+                with Horizontal(classes="compound-row"):
+                    if group_index > 0:
+                        yield Button(
+                            ENAQueryOperator.AND.value,
+                            id=f"compound-group-op-{group_index}",
+                            classes="top-operator operator-toggle",
+                        )
+                    else:
+                        yield Static("", classes="top-operator")
+                    yield Static(f"Group {group_index + 1}", classes="compound-heading")
+                for clause_index in range(self.CLAUSES_PER_GROUP):
+                    with Horizontal(classes="compound-row"):
+                        if clause_index > 0:
+                            yield Button(
+                                ENAQueryOperator.AND.value,
+                                id=f"compound-clause-op-{group_index}-{clause_index}",
+                                classes="clause-operator operator-toggle",
+                            )
+                        else:
+                            yield Static("", classes="clause-operator")
+                        yield Input(
+                            placeholder="field",
+                            suggester=SuggestFromList(self.field_ids, case_sensitive=False),
+                            id=f"compound-field-{group_index}-{clause_index}",
+                            classes="compound-field",
+                        )
+                        yield Input(
+                            placeholder="value",
+                            id=f"compound-value-{group_index}-{clause_index}",
+                            classes="compound-value",
+                        )
+                        yield Checkbox(
+                            "NOT",
+                            id=f"compound-not-{group_index}-{clause_index}",
+                            classes="compound-not",
+                        )
+
+    def open(self) -> None:
+        self.remove_class("hidden")
+        self.scroll_home(animate=False)
+        self.query_one(Input).focus()
+        self.update_preview()
+
+    def open_with_clause(self, field: str | None = None, value: str | None = None) -> None:
+        self.open()
+        if field:
+            field_input = self.query_one("#compound-field-0-0", Input)
+            value_input = self.query_one("#compound-value-0-0", Input)
+            field_input.value = field
+            if value:
+                value_input.value = value
+                value_input.focus()
+            else:
+                field_input.focus()
+        self.update_preview()
+
+    def close(self) -> None:
+        self.add_class("hidden")
+
+    def build_query(self) -> str:
+        group_expressions: list[ENAQueryExpression] = []
+        group_operators: list[ENAQueryOperator] = []
+
+        for group_index in range(self.GROUP_COUNT):
+            clauses: list[ENAQueryExpression] = []
+            clause_operators: list[ENAQueryOperator] = []
+
+            for clause_index in range(self.CLAUSES_PER_GROUP):
+                field = self.query_one(f"#compound-field-{group_index}-{clause_index}", Input).value.strip()
+                value = self.query_one(f"#compound-value-{group_index}-{clause_index}", Input).value.strip()
+                if not field and not value:
+                    continue
+                if not field or not value:
+                    raise ValueError("Each compound clause needs both a field and a value.")
+
+                is_not = self.query_one(f"#compound-not-{group_index}-{clause_index}", Checkbox).value
+                if clauses:
+                    operator = self.query_one(
+                        f"#compound-clause-op-{group_index}-{clause_index}", Button
+                    ).label
+                    clause_operators.append(ENAQueryOperator(str(operator)))
+                clauses.append(ENAQueryClause(field, value, is_not=is_not))
+
+            if not clauses:
+                continue
+
+            if group_expressions and group_index > 0:
+                operator = self.query_one(f"#compound-group-op-{group_index}", Button).label
+                group_operators.append(ENAQueryOperator(str(operator)))
+            group_expressions.append(combine_query_expressions(clauses, clause_operators))
+
+        if not group_expressions:
+            return ""
+
+        return str(combine_query_expressions(group_expressions, group_operators))
+
+    def update_preview(self) -> None:
+        preview = self.query_one("#compound-preview", Static)
+        try:
+            query = self.build_query()
+        except ValueError as error:
+            preview.update(str(error))
+            return
+        preview.update(query or "No compound clauses yet.")
+
+    def clear(self) -> None:
+        for input_field in self.query(Input).results():
+            input_field.value = ""
+        for checkbox in self.query(Checkbox).results():
+            checkbox.value = False
+        for button in self.query(Button).results():
+            if "operator-toggle" in button.classes:
+                button.label = ENAQueryOperator.AND.value
+        self.update_preview()
+
+    @on(Input.Changed)
+    @on(Checkbox.Changed)
+    def input_changed(self) -> None:
+        self.update_preview()
+
+    @on(Button.Pressed, ".operator-toggle")
+    def toggle_operator(self, event: Button.Pressed) -> None:
+        event.button.label = (
+            ENAQueryOperator.OR.value
+            if str(event.button.label) == ENAQueryOperator.AND.value
+            else ENAQueryOperator.AND.value
+        )
+        self.update_preview()
+        event.stop()
+
+    @on(Button.Pressed, "#apply-compound")
+    def apply_compound(self) -> None:
+        try:
+            query = self.build_query()
+        except ValueError as error:
+            self.notify(str(error), severity="error")
+            self.update_preview()
+            return
+        self.post_message(self.Applied(query))
+        self.close()
+
+    @on(Button.Pressed, "#preview-compound")
+    def preview_compound(self) -> None:
+        self.update_preview()
+
+    @on(Button.Pressed, "#clear-compound")
+    def clear_compound(self) -> None:
+        self.clear()
+
+    @on(Button.Pressed, "#close-compound")
+    def close_compound(self) -> None:
+        self.close()
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            self.close()
             event.stop()
             event.prevent_default()
 
@@ -183,12 +517,17 @@ class SearchForm(Widget):
     SearchForm {
         border: solid $accent;
     }
+
+    #open-compound {
+        width: 100%;
+    }
     """
 
     BORDER_TITLE = "Queries"
 
     BINDINGS = [
-        ("/", "open_filter", "Find query field")
+        ("ctrl+f", "open_filter", "Find query field"),
+        ("ctrl+g", "open_compound_builder", "Compound query")
     ]
 
     def compose(self) -> ComposeResult:
@@ -203,17 +542,19 @@ class SearchForm(Widget):
                     return
 
                 field_ids = search_fields.data.columnId.tolist()
+                yield Button("Compound", id="open-compound")
+                yield CompoundQueryBuilder(field_ids, id="compound-builder", classes="hidden")
                 yield ListFilter(field_ids, id="query-filter", classes="hidden")
                 for _, field in search_fields.data.iterrows():
                     yield Input(placeholder=field["columnId"], id=field["columnId"])
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if isinstance(event.input.parent, ListFilter):
+        if has_ancestor(event.input, ListFilter) or has_ancestor(event.input, CompoundQueryBuilder):
             return
 
         query_string = ""
         for input_field in self.query(Input).results():
-            if isinstance(input_field.parent, ListFilter):
+            if has_ancestor(input_field, ListFilter) or has_ancestor(input_field, CompoundQueryBuilder):
                 continue
             if input_field.value:
                 if not query_string:
@@ -227,15 +568,40 @@ class SearchForm(Widget):
             return
 
         focused = self.app.focused
-        if isinstance(focused, Input) and not isinstance(focused.parent, ListFilter):
+        if (
+                isinstance(focused, Input)
+                and not has_ancestor(focused, ListFilter)
+                and not has_ancestor(focused, CompoundQueryBuilder)
+        ):
             results_table = self.app.query_one(SearchResults).query_one_optional(DataTable)
             if results_table is not None:
                 results_table.focus()
                 event.stop()
                 event.prevent_default()
 
+    @on(Button.Pressed, "#open-compound")
+    def open_compound_button(self) -> None:
+        self.action_open_compound_builder()
+
     def action_open_filter(self) -> None:
+        focused = self.app.focused
+        if isinstance(focused, Widget) and has_ancestor(focused, CompoundQueryBuilder):
+            return
         self.query_one("#query-filter", ListFilter).open()
+
+    def action_open_compound_builder(self) -> None:
+        focused = self.app.focused
+        field = None
+        value = None
+        if (
+                isinstance(focused, Input)
+                and focused.id is not None
+                and not has_ancestor(focused, ListFilter)
+                and not has_ancestor(focused, CompoundQueryBuilder)
+        ):
+            field = focused.id
+            value = focused.value
+        self.query_one("#compound-builder", CompoundQueryBuilder).open_with_clause(field, value)
 
     def on_list_filter_selected(self, event: ListFilter.Selected) -> None:
         event.stop()
@@ -245,6 +611,10 @@ class SearchForm(Widget):
                 input_field.focus()
                 input_field.scroll_visible(immediate=True)
                 return
+
+    def on_compound_query_builder_applied(self, event: CompoundQueryBuilder.Applied) -> None:
+        event.stop()
+        self.queries = event.query
 
 
 class GlobalOptions(Widget):
@@ -299,7 +669,7 @@ class ReturnFieldsSelector(Widget):
 
     BINDINGS = [
         ("a", "select_all", "Select all"),
-        ("/", "open_filter", "Find return field")
+        ("ctrl+f", "open_filter", "Find return field")
     ]
 
     def compose(self) -> ComposeResult:
